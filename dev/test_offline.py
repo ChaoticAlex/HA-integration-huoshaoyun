@@ -45,35 +45,26 @@ def nxt(hours, future=True):
     return {"in_hours": hours, "is_future": future}
 
 
-print("\n[1] 分档节拍 (基准 90min / 临近 15min)")
-c = mk()
-for h, want in ((0.5, 15), (2.0, 45), (8.0, 90), (20.0, 360)):
-    c._unchanged = 0
-    c._adapt_interval(nxt(h))
-    check(f"距事件 {h}h", mins(c), want)
-c._adapt_interval(nxt(8.0, future=False))     # 事件已过 -> 回落常规
-check("事件已过 -> 常规档", mins(c), 90)
+print("\n[1] 恒定节拍: 与距事件多远无关, 恒为配置值")
 
-print("\n[2] 数据未变退避 (最多 x3, 上限 8h; 距事件 6h 内不退避)")
-c = mk()
-c._unchanged = 1
-c._adapt_interval(nxt(20.0))
-check("远(20h) 未变1次", mins(c), 480)          # 360 * 2 = 720 -> 封顶 8h
-c._unchanged = 2
-c._adapt_interval(nxt(20.0))
-check("远(20h) 未变2次", mins(c), 480)
-c._unchanged = 9
-c._adapt_interval(nxt(20.0))
-check("远(20h) 未变很多次(封顶)", mins(c), 480)
-c._unchanged = 2
-c._adapt_interval(nxt(8.0))
-check("近(8h) 未变 -> 可退避", mins(c), 270)     # 90 * min(2+1,3)
-c._unchanged = 2
-c._adapt_interval(nxt(5.0))
-check("很近(5h) 未变 -> 不退避", mins(c), 90)
-c._unchanged = 5
-c._adapt_interval(nxt(0.5))
-check("临近(0.5h) 未变 -> 不退避", mins(c), 15)
+
+def case_flat():
+    c = mk()
+    check("初始间隔", mins(c), 180)
+    for h in (0.5, 2.0, 8.0, 20.0):
+        c._stamp_events({"updated": datetime(2026, 10, 9, 12, 0), "events": {
+            "set_1": {"event_time": f"2026-10-09 {18 if h < 6 else 22:02d}:00", "quality": 0.3},
+            "rise_1": {"event_time": "2026-10-10 06:23", "quality": 0.2}}})
+        c._adapt_interval()
+        check(f"距事件 {h}h 附近仍是恒定节拍", mins(c), 180)
+    # 自定义间隔应生效
+    c2 = mk()
+    c2._base_interval = 360
+    c2._adapt_interval()
+    check("自定义 360 分钟生效", mins(c2), 360)
+
+
+case_flat()
 
 print("\n[3] 普通失败: 抛 UpdateFailed + 实体置不可用 + 重试提前到 %d 分钟" % FAILURE_RETRY_MIN)
 
@@ -179,16 +170,18 @@ async def case_quota_backoff():
 
 asyncio.run(case_quota_backoff())
 
-print("\n[4] 恢复后回到正常分档")
+print("\n[4] 失败/配额之后能回到恒定节拍")
 c = mk()
-c._failed = True
-c.update_interval = timedelta(minutes=FAILURE_RETRY_MIN)
-c._failed = False
-c._unchanged = 0
-c._adapt_interval(nxt(20.0))
-check("恢复 -> 放宽档", mins(c), 360)
-c._adapt_interval(nxt(0.5))
-check("恢复 -> 临近档", mins(c), 15)
+c.update_interval = timedelta(minutes=FAILURE_RETRY_MIN)   # 普通失败后的临时短间隔
+c._adapt_interval()
+check("普通失败恢复 -> 恒定节拍", mins(c), 180)
+c.update_interval = timedelta(minutes=720)                 # 配额退避后的长间隔
+c._quota_strikes = 4
+c._adapt_interval()
+check("配额未恢复(第4次) -> 维持长退避", mins(c), 240)   # 30·2^(4-1)
+c._quota_strikes = 0
+c._adapt_interval()
+check("配额恢复 -> 恒定节拍", mins(c), 180)
 
 print("\n[5] 事件刻印 in_hours / 已过, 与最近事件挑选")
 c = mk()

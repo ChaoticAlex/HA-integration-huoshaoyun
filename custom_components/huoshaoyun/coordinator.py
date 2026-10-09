@@ -1,12 +1,13 @@
-"""数据协调器 —— 性能/请求/可读性/自动化友好 四项优化集中在这里。
+"""数据协调器 —— 恒定低频节拍, 只求"够看"。
 
-优化要点:
-1) 请求优化: 按"距下一次霞光多远"分 4 档节拍(1h/3h/12h/更远), 而不是固定间隔;
-   模型数据只在起报更新时变化, 远离事件时无需密拉。
-2) 请求优化: 数据指纹(模型输出哈希)连续未变时自动退避, 最多拉到 3 档(≤6h),
-   但绝不作用在"距事件 6h 以内"的窗口 —— 保证事件前一定用最新起报。
-3) 性能优化: 指纹未变则直接复用上轮计算结果, 跳过 ~0.3s 的评分计算。
-4) 自动化友好: 每个事件都带 `距今小时`/`已过`; 数据层暴露 `数据指纹`/`数据变更`。
+模型数据只在起报更新时变化(GFS 4 次/天, IFS 2~4 次/天, CAMS 2 次/天),
+同一份起报内分数是常数, 因此:
+
+- **恒定节拍**: 默认 180 分钟一拉, 不做"临近事件提速"(不需要), 行为可预测、请求量最小
+- **请求最小化**: 每轮 3 个请求, 18 个断面点 × 2 模型合并进单次请求
+- **数据指纹**: 未变则直接复用上轮计算结果, 省掉 ~0.3s 评分计算(不影响调度)
+- **配额保护**: 429 不重试; 配额用尽则逐次翻倍长退避(30→720 分钟), 期间实体不可用
+- **自动化友好**: 每个事件都带 `距今小时`/`已过`; 数据层暴露 `数据指纹`/`数据变更`
 
 输出只有纯数值, 不做评级、不做"值得拍"判断 —— 交给 HA 自动化。
 """
@@ -23,20 +24,10 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from . import fetcher
 from . import hsy_core as H
-from .const import (CONF_API_KEY, DEFAULT_INTERVAL, DEFAULT_NEAR_INTERVAL, DOMAIN,
-                    FAILURE_RETRY_MIN, MODELS_MAP, NEAR_WINDOW_HOURS, QUOTA_BACKOFF_CAP_MIN,
-                    QUOTA_BACKOFF_MIN)
+from .const import (CONF_API_KEY, DEFAULT_INTERVAL, DOMAIN, FAILURE_RETRY_MIN, MODELS_MAP,
+                    QUOTA_BACKOFF_CAP_MIN, QUOTA_BACKOFF_MIN)
 
 _LOGGER = logging.getLogger(__name__)
-
-
-TIER_NEAR_H = 1.0      # <=1h  : 用"临近间隔"(默认15min)
-TIER_MID_H = 3.0       # <=3h  : 用常规间隔的一半(>=15min)
-TIER_FAR_H = 12.0      # <=12h : 用常规间隔
-FAR_INTERVAL_H = 6.0   # >12h  : 至少 6h 一拉
-BACKOFF_MAX = 3        # 数据连续未变时最多放大到 3 档
-BACKOFF_CAP_H = 8.0    # 未变退避上限(h)
-NO_BACKOFF_WITHIN_H = 6.0   # 距事件 6h 以内禁止退避
 
 
 def _merge_cloud(per_model: dict) -> dict | None:
@@ -88,9 +79,7 @@ class HuoshaoyunCoordinator(DataUpdateCoordinator):
         self.api_key = str(opt.get(CONF_API_KEY) or "").strip() or None
         self.tz = ZoneInfo(opt.get("timezone") or hass.config.time_zone)
         self._base_interval = int(opt.get("update_interval", DEFAULT_INTERVAL))
-        self._near_interval = int(opt.get("near_interval", DEFAULT_NEAR_INTERVAL))
         self._last_fp: str | None = None
-        self._unchanged = 0
         self._quota_strikes = 0      # 连续配额用尽次数, 用于逐次翻倍退避
         super().__init__(hass, _LOGGER, name=f"{DOMAIN} {self.site_name}",
                          update_interval=timedelta(minutes=self._base_interval))
@@ -136,20 +125,17 @@ class HuoshaoyunCoordinator(DataUpdateCoordinator):
 
         if fingerprint == self._last_fp and self.data:
             # 起报未变: 复用上轮结果, 省掉 ~0.3s 评分计算
-            self._unchanged += 1
             data = dict(self.data)
             data["updated"] = now
             data["data_changed"] = False
             data["partial"] = meta["partial"]
             data["missing"] = meta["missing"]
             self._stamp_events(data)
-            self._adapt_interval(data["next"])
-            _LOGGER.debug("[%s] 起报未变(第%d次), 复用上轮结果", self.site_name,
-                          self._unchanged)
+            self._adapt_interval()
+            _LOGGER.debug("[%s] 起报未变, 复用上轮结果", self.site_name)
             return data
 
         self._last_fp = fingerprint
-        self._unchanged = 0
         if self._quota_strikes:
             _LOGGER.info("[%s] 取数恢复, 重置配额退避", self.site_name)
             self._quota_strikes = 0
@@ -205,7 +191,7 @@ class HuoshaoyunCoordinator(DataUpdateCoordinator):
                 "amount_src": self.amount_src,
             }
         self._stamp_events(data)
-        self._adapt_interval(data["next"])
+        self._adapt_interval()
         return data
 
     # ------------------------------------------------------------ 事件时刻刻印
@@ -238,31 +224,20 @@ class HuoshaoyunCoordinator(DataUpdateCoordinator):
         future = [c for c in cands if c[0] >= now]
         t, event, info = min(future) if future else max(cands)
         return {"event": event, "name": H.EVENT_CN[event], "time": info["event_time"],
-                "hhmm": t.strftime("%H:%M"), "in_hours": info["in_hours"],
-                "is_future": info["is_future"], "quality": info["quality"],
-                "aod": info["aod"], "layers": info["layers"], "cloud": info.get("cloud")}
+                "hhmm": t.strftime("%H:%M"), "in_hours": info.get("in_hours"),
+                "is_future": info.get("is_future"), "quality": info.get("quality"),
+                "aod": info.get("aod"), "layers": info.get("layers"),
+                "cloud": info.get("cloud")}
 
-    # ------------------------------------------------------------ 请求节拍
-    def _adapt_interval(self, nxt: dict | None) -> None:
-        """分档节拍 + 数据未变时退避(距事件 6h 内不退避)"""
-        base, near = self._base_interval, self._near_interval
-        if not nxt or not nxt.get("is_future"):
-            want = base
-            hours = 99.0
+    # ------------------------------------------------------------ 刷新节拍
+    def _adapt_interval(self) -> None:
+        """恒定节拍: 只有配额用尽才临时拉长, 恢复后回到配置的固定间隔。"""
+        if self._quota_strikes:
+            mins = min(QUOTA_BACKOFF_MIN * (2 ** (self._quota_strikes - 1)),
+                       QUOTA_BACKOFF_CAP_MIN)
         else:
-            hours = nxt["in_hours"]
-            if hours <= TIER_NEAR_H:
-                want = min(near, base)
-            elif hours <= TIER_MID_H:
-                want = max(near, base // 2)
-            elif hours <= TIER_FAR_H:
-                want = base
-            else:
-                want = max(base, int(FAR_INTERVAL_H * 60))
-        if self._unchanged and hours > NO_BACKOFF_WITHIN_H:
-            want = min(want * min(self._unchanged + 1, BACKOFF_MAX),
-                       int(BACKOFF_CAP_H * 60))
-        interval = timedelta(minutes=max(5, want))
+            mins = self._base_interval
+        interval = timedelta(minutes=max(5, mins))
         if self.update_interval != interval:
             _LOGGER.debug("[%s] 刷新间隔 -> %s 分钟", self.site_name, interval)
             self.update_interval = interval

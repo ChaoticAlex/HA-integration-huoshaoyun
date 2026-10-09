@@ -11,9 +11,9 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (CONF_AMOUNT_SRC, CONF_INTERVAL, CONF_LATITUDE, CONF_LONGITUDE,
-                    CONF_API_KEY, CONF_MODELS, CONF_NAME, CONF_NEAR_INTERVAL,
-                    CONF_TIMEZONE, DEFAULT_INTERVAL, DEFAULT_NEAR_INTERVAL,
-                    DOMAIN, MODEL_CHOICES, SRC_CHOICES)
+                    CONF_API_KEY, CONF_MODELS, CONF_NAME,
+                    CONF_TIMEZONE, DEFAULT_INTERVAL, DOMAIN, MODEL_CHOICES,
+                    SRC_CHOICES)
 
 _HOME = "home"
 _MANUAL = "manual"
@@ -134,11 +134,7 @@ class HuoshaoyunOptionsFlow(OptionsFlow):
                     mode=selector.SelectSelectorMode.DROPDOWN)),
             vol.Required(CONF_INTERVAL, default=int(opt.get(CONF_INTERVAL, DEFAULT_INTERVAL))):
                 selector.NumberSelector(selector.NumberSelectorConfig(
-                    min=15, max=360, step=5, mode=selector.NumberSelectorMode.BOX,
-                    unit_of_measurement="min")),
-            vol.Required(CONF_NEAR_INTERVAL, default=int(opt.get(CONF_NEAR_INTERVAL, DEFAULT_NEAR_INTERVAL))):
-                selector.NumberSelector(selector.NumberSelectorConfig(
-                    min=5, max=120, step=5, mode=selector.NumberSelectorMode.BOX,
+                    min=30, max=720, step=15, mode=selector.NumberSelectorMode.BOX,
                     unit_of_measurement="min")),
             vol.Optional(CONF_TIMEZONE, default=opt.get(CONF_TIMEZONE, self.hass.config.time_zone)):
                 selector.TextSelector(),
