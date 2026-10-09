@@ -49,6 +49,9 @@ triggers:
 
 参考分级（仅供选阈值）：`0.05 微微烧 / 0.2 小烧 / 0.4 小烧~中等烧 / 0.6 中等烧 / 0.8 大烧`
 
+**每个数值到底什么意思** → [`docs/ENTITIES.md`](docs/ENTITIES.md)（6 个实体的量纲/范围/读法 + 属性字典）
+**算法怎么算的、各档分数长什么样** → [`docs/ALGORITHM.md`](docs/ALGORITHM.md)（几何推导、评分公式、5 个判断实例）
+
 ## 数据与请求
 
 - 云况 NCEP-GFS 0.25° / ECMWF-IFS 0.25°，气溶胶 CAMS，经 Open-Meteo 取数（**免 API key**）
