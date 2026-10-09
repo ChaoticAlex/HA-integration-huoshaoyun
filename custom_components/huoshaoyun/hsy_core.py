@@ -16,7 +16,9 @@ import math
 from datetime import datetime, timedelta
 
 R = 6371000.0
-PLEV = [950, 900, 850, 800, 750, 700, 650, 600, 550, 500, 450, 400, 350, 300, 250, 200]
+# 气压层: 8 层 × 3 变量 = 24 个变量, 可与 18 个断面点合并进**单次请求**
+# (实测 24 变量 × 18 点可用; 层数越多请求数越多, 直接关系 Open-Meteo 配额消耗)
+PLEV = [900, 850, 700, 600, 500, 400, 300, 200]
 TRANSECT_KM = [0, 30, 60, 100, 150, 210, 270, 330, 400]
 GFS, ECMWF = "gfs_ifs_gfs", "ecmwf_ifs025"          # 占位, 实际由 fetcher 传入
 MODEL_LABEL = {"gfs_global": "NCEP-GFS", "ecmwf_ifs025": "ECMWF-IFS"}

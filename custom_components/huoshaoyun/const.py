@@ -3,7 +3,7 @@ from __future__ import annotations
 
 DOMAIN = "huoshaoyun"
 NAME = "火烧云 / 朝霞晚霞预报"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 PLATFORMS = ["sensor"]
 
 # 配置项
@@ -31,8 +31,12 @@ SRC_CHOICES = {"mean": "诊断云量与廓线反演的均值(推荐)",
 SRC_LABEL = {"mean": "均值", "rh": "廓线反演", "diag": "诊断云量"}
 
 # 默认值
-DEFAULT_INTERVAL = 60        # 常规刷新(分钟)
+DEFAULT_INTERVAL = 90        # 常规刷新(分钟)
 DEFAULT_NEAR_INTERVAL = 15   # 临近事件时的刷新(分钟)
 NEAR_WINDOW_HOURS = 3        # 距事件 ≤3h 视为"临近"
-FAILURE_RETRY_MIN = 5        # 取数失败后, 下次重试提前到几分钟(默认档位可能长达 3h)
+FAILURE_RETRY_MIN = 10       # 普通取数失败后的重试间隔(分钟)
+# Open-Meteo 免费额度(按 IP): <10000次/天, 5000/小时, 600/分钟
+# 配额用尽时必须长退避, 否则"失败→立刻重试"会自激成死循环、永远无法恢复
+QUOTA_BACKOFF_MIN = 30       # 配额用尽的首次退避(分钟), 此后逐次翻倍
+QUOTA_BACKOFF_CAP_MIN = 720  # 退避上限(分钟)
 FORECAST_DAYS = 2

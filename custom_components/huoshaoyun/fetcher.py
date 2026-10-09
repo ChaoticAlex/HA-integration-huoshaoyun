@@ -31,28 +31,45 @@ _TIMEOUT = aiohttp.ClientTimeout(total=45)
 _FETCH_LOCK = asyncio.Lock()
 
 
-class _RateLimited(Exception):
-    def __init__(self, delay: float) -> None:
-        super().__init__("rate limited(429)")
-        self.delay = delay
+class QuotaExhausted(Exception):
+    """Open-Meteo 配额用尽(429)。
+
+    这种情况**重试毫无意义且有害**: 每次重试都照样计入配额, 而"失败即重试"
+    会与协调器的重试间隔构成自激循环, 使配额永远无法恢复。
+    因此这里直接抛出, 由协调器做长退避(分钟~小时级)。
+    """
+
+    def __init__(self, scope: str, reason: str) -> None:
+        super().__init__(reason)
+        self.scope = scope          # "day" / "hour" / "other"
+        self.reason = reason
 
 
-async def _get(session: aiohttp.ClientSession, url: str, params: dict, retries: int = 4):
-    """带退避重试的 GET。429 时优先按 Retry-After 退避, 否则指数退避(上限 30s)。"""
+async def _get(session: aiohttp.ClientSession, url: str, params: dict, retries: int = 3):
+    """GET。
+
+    - **429(配额)**: 立即抛出 QuotaExhausted, **不重试** —— 重试同样计费且会自激
+    - 网络错误 / 5xx: 退避重试
+    """
     last = None
     for attempt in range(retries):
         try:
             async with session.get(url, params=params, timeout=_TIMEOUT) as resp:
                 if resp.status == 429:
-                    ra = (resp.headers.get("Retry-After") or "").strip()
-                    delay = float(ra) if ra.replace(".", "", 1).isdigit() else min(30.0, 2.0 ** (attempt + 1))
-                    raise _RateLimited(delay)
+                    reason = ""
+                    try:
+                        body = await resp.json(content_type=None)
+                        reason = body.get("reason", "") if isinstance(body, dict) else ""
+                    except Exception:                 # noqa: BLE001
+                        reason = "429 Too Many Requests"
+                    low = reason.lower()
+                    scope = ("day" if ("daily" in low or "day" in low) else
+                             "hour" if ("hourly" in low or "hour" in low) else "other")
+                    raise QuotaExhausted(scope, reason or "429 Too Many Requests")
                 resp.raise_for_status()
                 return await resp.json(content_type=None)
-        except _RateLimited as err:
-            last = err
-            _LOGGER.warning("被限流(429), %.0fs 后重试 (%d/%d)", err.delay, attempt + 1, retries)
-            await asyncio.sleep(err.delay)
+        except QuotaExhausted:
+            raise                                     # 不重试
         except Exception as err:                      # noqa: BLE001
             last = err
             if attempt < retries - 1:
@@ -61,8 +78,8 @@ async def _get(session: aiohttp.ClientSession, url: str, params: dict, retries: 
 
 
 def _plev_chunks() -> list[list[int]]:
-    """气压层分块: 每块 ≤6 层 (6×3=18 个变量/请求)"""
-    return [PLEV[i:i + 6] for i in range(0, len(PLEV), 6)]
+    """气压层分块: 每块 ≤8 层 (8×3=24 个变量/请求, 实测可用) -> 整个廓线只需 1 个请求"""
+    return [PLEV[i:i + 8] for i in range(0, len(PLEV), 8)]
 
 
 def _normalize(entry: dict, models: tuple[str, ...]) -> dict[str, dict]:

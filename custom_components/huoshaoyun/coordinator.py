@@ -24,16 +24,16 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from . import fetcher
 from . import hsy_core as H
 from .const import (DEFAULT_INTERVAL, DEFAULT_NEAR_INTERVAL, DOMAIN, FAILURE_RETRY_MIN,
-                    MODELS_MAP, NEAR_WINDOW_HOURS)
+                    MODELS_MAP, NEAR_WINDOW_HOURS, QUOTA_BACKOFF_CAP_MIN, QUOTA_BACKOFF_MIN)
 
 _LOGGER = logging.getLogger(__name__)
 
 TIER_NEAR_H = 1.0      # <=1h  : 用"临近间隔"(默认15min)
 TIER_MID_H = 3.0       # <=3h  : 用常规间隔的一半(>=15min)
 TIER_FAR_H = 12.0      # <=12h : 用常规间隔
-FAR_INTERVAL_H = 3.0   # >12h  : 至少 3h 一拉
+FAR_INTERVAL_H = 6.0   # >12h  : 至少 6h 一拉
 BACKOFF_MAX = 3        # 数据连续未变时最多放大到 3 档
-BACKOFF_CAP_H = 6.0    # 退避上限(h)
+BACKOFF_CAP_H = 8.0    # 未变退避上限(h)
 NO_BACKOFF_WITHIN_H = 6.0   # 距事件 6h 以内禁止退避
 
 
@@ -88,6 +88,7 @@ class HuoshaoyunCoordinator(DataUpdateCoordinator):
         self._near_interval = int(opt.get("near_interval", DEFAULT_NEAR_INTERVAL))
         self._last_fp: str | None = None
         self._unchanged = 0
+        self._quota_strikes = 0      # 连续配额用尽次数, 用于逐次翻倍退避
         super().__init__(hass, _LOGGER, name=f"{DOMAIN} {self.site_name}",
                          update_interval=timedelta(minutes=self._base_interval))
 
@@ -110,11 +111,21 @@ class HuoshaoyunCoordinator(DataUpdateCoordinator):
                 session, self.lat, self.lon, str(self.tz), self.tz_hours,
                 base_date, self.models)
             fingerprint = meta["fingerprint"]
+        except fetcher.QuotaExhausted as err:
+            # 配额用尽: 必须长退避。绝不能"失败就立刻重试"—— 每个请求都照样计入配额,
+            # 而重试间隔远小于配额重置窗口时会形成自激循环, 让配额永远无法恢复。
+            self._quota_strikes += 1
+            mins = min(QUOTA_BACKOFF_MIN * (2 ** (self._quota_strikes - 1)),
+                       QUOTA_BACKOFF_CAP_MIN)
+            self.update_interval = timedelta(minutes=mins)
+            scope_cn = {"day": "每日", "hour": "每小时", "other": ""}.get(err.scope, "")
+            _LOGGER.warning(
+                "[%s] Open-Meteo %s配额已用尽(%s) -> 退避 %d 分钟(第%d次连续), 期间实体不可用",
+                self.site_name, scope_cn, err.reason or "429", mins, self._quota_strikes)
+            raise UpdateFailed(f"Open-Meteo {scope_cn}配额用尽: {err.reason}") from err
         except Exception as err:                       # noqa: BLE001
-            # 失败就是失败: 走 HA 标准语义 —— 实体置为"不可用"(UI/自动化/日志都看得见),
+            # 普通失败: 走 HA 标准语义 —— 实体置为"不可用"(UI/自动化/日志都看得见),
             # 而不是拿旧数值冒充新鲜数据。仅本地点受影响, 其它条目各自独立。
-            # 代价是"不可用"会持续到下一个刷新点, 最长可能是一个 3h 档;
-            # 所以这里把下次重试提前到 FAILURE_RETRY_MIN 分钟, 成功后自动回到正常分档。
             self.update_interval = timedelta(minutes=FAILURE_RETRY_MIN)
             _LOGGER.warning("[%s] 取数失败, 实体置为不可用, %d 分钟后重试: %s",
                             self.site_name, FAILURE_RETRY_MIN, err)
@@ -136,6 +147,9 @@ class HuoshaoyunCoordinator(DataUpdateCoordinator):
 
         self._last_fp = fingerprint
         self._unchanged = 0
+        if self._quota_strikes:
+            _LOGGER.info("[%s] 取数恢复, 重置配额退避", self.site_name)
+            self._quota_strikes = 0
         raw = {}
         for model in self.models:
             try:

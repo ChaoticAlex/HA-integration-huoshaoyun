@@ -16,7 +16,8 @@ from homeassistant.core import HomeAssistant                              # noqa
 from homeassistant.helpers.update_coordinator import UpdateFailed         # noqa: E402
 
 from custom_components.huoshaoyun import fetcher                          # noqa: E402
-from custom_components.huoshaoyun.const import FAILURE_RETRY_MIN          # noqa: E402
+from custom_components.huoshaoyun.const import (FAILURE_RETRY_MIN,      # noqa: E402
+                                                QUOTA_BACKOFF_CAP_MIN, QUOTA_BACKOFF_MIN)
 from custom_components.huoshaoyun.coordinator import HuoshaoyunCoordinator  # noqa: E402
 
 OK, BAD = "✅", "❌"
@@ -44,37 +45,37 @@ def nxt(hours, future=True):
     return {"in_hours": hours, "is_future": future}
 
 
-print("\n[1] 分档节拍 (基准 60min / 临近 15min)")
+print("\n[1] 分档节拍 (基准 90min / 临近 15min)")
 c = mk()
-for h, want in ((0.5, 15), (2.0, 30), (8.0, 60), (20.0, 180)):
+for h, want in ((0.5, 15), (2.0, 45), (8.0, 90), (20.0, 360)):
     c._unchanged = 0
     c._adapt_interval(nxt(h))
     check(f"距事件 {h}h", mins(c), want)
 c._adapt_interval(nxt(8.0, future=False))     # 事件已过 -> 回落常规
-check("事件已过 -> 常规档", mins(c), 60)
+check("事件已过 -> 常规档", mins(c), 90)
 
-print("\n[2] 数据未变退避 (最多 x3, 上限 6h; 距事件 6h 内不退避)")
+print("\n[2] 数据未变退避 (最多 x3, 上限 8h; 距事件 6h 内不退避)")
 c = mk()
 c._unchanged = 1
 c._adapt_interval(nxt(20.0))
-check("远(20h) 未变1次", mins(c), 360)          # 180 * min(1+1,3)=360, 正好到 6h 上限
+check("远(20h) 未变1次", mins(c), 480)          # 360 * 2 = 720 -> 封顶 8h
 c._unchanged = 2
 c._adapt_interval(nxt(20.0))
-check("远(20h) 未变2次", mins(c), 360)
+check("远(20h) 未变2次", mins(c), 480)
 c._unchanged = 9
 c._adapt_interval(nxt(20.0))
-check("远(20h) 未变很多次(封顶)", mins(c), 360)
+check("远(20h) 未变很多次(封顶)", mins(c), 480)
 c._unchanged = 2
 c._adapt_interval(nxt(8.0))
-check("近(8h) 未变 -> 可退避", mins(c), 180)     # 60 * min(2+1,3)
+check("近(8h) 未变 -> 可退避", mins(c), 270)     # 90 * min(2+1,3)
 c._unchanged = 2
 c._adapt_interval(nxt(5.0))
-check("很近(5h) 未变 -> 不退避", mins(c), 60)
+check("很近(5h) 未变 -> 不退避", mins(c), 90)
 c._unchanged = 5
 c._adapt_interval(nxt(0.5))
 check("临近(0.5h) 未变 -> 不退避", mins(c), 15)
 
-print("\n[3] 失败语义: 抛 UpdateFailed + 实体置不可用 + 重试提前到 5 分钟")
+print("\n[3] 普通失败: 抛 UpdateFailed + 实体置不可用 + 重试提前到 %d 分钟" % FAILURE_RETRY_MIN)
 
 async def fake_fail(*a, **k):
     raise RuntimeError("rate limited(429)")
@@ -97,6 +98,87 @@ async def case_failure():
 
 asyncio.run(case_failure())
 
+print("\n[3b] 429 配额用尽: 立即失败且**不重试**(不浪费配额)")
+
+
+class _Resp:
+    def __init__(self, status, payload=None):
+        self.status = status
+        self._payload = payload
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def json(self, content_type=None):
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status >= 400:
+            raise RuntimeError(f"HTTP {self.status}")
+
+
+class _Session:
+    """只统计调用次数的最小假 session"""
+
+    def __init__(self, resp):
+        self.resp = resp
+        self.calls = 0
+
+    def get(self, *a, **k):
+        self.calls += 1
+        return self.resp
+
+
+async def case_quota():
+    for scope, payload in (("day", {"error": True, "reason": "Daily API request limit exceeded. Please try again tomorrow."}),
+                           ("hour", {"error": True, "reason": "Hourly API request limit exceeded. Please try again in the next hour."})):
+        s = _Session(_Resp(429, payload))
+        try:
+            await fetcher._get(s, "http://x", {})
+            print(f"  {BAD} 未抛出 QuotaExhausted")
+            fails.append("429 未抛出")
+        except fetcher.QuotaExhausted as e:
+            check(f"429/{scope} -> scope", e.scope, scope)
+        check(f"429/{scope} 只发 1 个请求(不重试)", s.calls, 1)
+
+    # 5xx 仍应重试
+    s = _Session(_Resp(503, None))
+    try:
+        await fetcher._get(s, "http://x", {}, retries=3)
+    except Exception:
+        pass
+    check("503 会重试(3次)", s.calls, 3)
+
+asyncio.run(case_quota())
+
+print("\n[3c] 配额用尽 -> 退避逐次翻倍, 上限封顶")
+
+
+async def case_quota_backoff():
+    c = mk("配额点")
+
+    async def fake_quota(*a, **k):
+        raise fetcher.QuotaExhausted("day", "Daily API request limit exceeded.")
+
+    orig = fetcher.async_fetch_transects
+    fetcher.async_fetch_transects = fake_quota
+    try:
+        seen = []
+        for i in range(7):
+            try:
+                await c._async_update_data()
+            except UpdateFailed:
+                seen.append(mins(c))
+        want = [min(QUOTA_BACKOFF_MIN * (2 ** i), QUOTA_BACKOFF_CAP_MIN) for i in range(7)]
+        check("退避序列(分钟)", seen, want)
+    finally:
+        fetcher.async_fetch_transects = orig
+
+asyncio.run(case_quota_backoff())
+
 print("\n[4] 恢复后回到正常分档")
 c = mk()
 c._failed = True
@@ -104,7 +186,7 @@ c.update_interval = timedelta(minutes=FAILURE_RETRY_MIN)
 c._failed = False
 c._unchanged = 0
 c._adapt_interval(nxt(20.0))
-check("恢复 -> 放宽档", mins(c), 180)
+check("恢复 -> 放宽档", mins(c), 360)
 c._adapt_interval(nxt(0.5))
 check("恢复 -> 临近档", mins(c), 15)
 
