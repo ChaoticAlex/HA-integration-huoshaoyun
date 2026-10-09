@@ -64,9 +64,25 @@ triggers:
 - 云量有"模式诊断"与"湿度廓线反演"两种口径，默认取均值（两者都放进属性供判断）
 - 太阳高度角 >0 不计分（那是"金色时刻"，不是"霞"）
 
+## AI 参与说明
+
+本集成由 AI 助手在人工指导下生成，请据此判断是否采信：
+
+- **AI 参与**：代码与文档绝大部分由 AI 编写
+- **人工参与**：需求定义、关键口径决策（评分因子与权重、云量口径、降级与失败语义、输出形态）、
+  逐轮验收与修正；**未逐行审查全部代码**
+- **已实测**：离线自检（请求分档 / 退避 / 失败语义）全绿；联网端到端跑通（GFS + ECMWF 双模式 × 4 个事件，含云层与 AOD）；HACS 兼容性静态核验
+- **未实测**：未在真实 Home Assistant 中加载运行，实体实际取值与长期稳定性未经真机验证
+- **成熟度**：实验性（experimental）
+
+HA 的 [OHF AI Policy](https://developers.home-assistant.io/docs/ai_policy/) 只约束提交给
+Open Home Foundation 项目（如 HA Core）的贡献，**不自动约束 HACS 社区集成**；
+[社区惯例](https://github.com/jpawlowski/hacs.integration_blueprint/blob/main/AI_POLICY.md)
+则主张按上述维度如实披露。
+
 ## 声明与许可
 
-非官方第三方集成；算法依据sunsetbot.top 及其团队**公开发布**的
+非官方第三方集成；算法依据 sunsetbot.top 及其团队**公开发布**的
 因子清单与公开教程中的"火烧云三角"几何独立重写，与 sunsetbot.top 及其团队无隶属或背书关系。
 
 MIT © 2026 ChaoticAlex
