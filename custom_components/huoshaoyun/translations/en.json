@@ -1,0 +1,60 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add a fire-cloud forecast location",
+        "description": "Pick where the location comes from. Each location is a separate entry.",
+        "data": {
+          "source": "Location source"
+        }
+      },
+      "home": {
+        "title": "Use Home Assistant home location",
+        "data": {
+          "name": "Name"
+        }
+      },
+      "manual": {
+        "title": "Enter coordinates manually",
+        "data": {
+          "name": "Name",
+          "latitude": "Latitude",
+          "longitude": "Longitude"
+        }
+      },
+      "zone": {
+        "title": "Pick a Home Assistant zone",
+        "data": {
+          "zone": "Zone"
+        }
+      },
+      "zone_name": {
+        "title": "Name this location",
+        "data": {
+          "name": "Name"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This coordinate is already configured",
+      "no_zone": "No zone available"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Fire-cloud options",
+        "data": {
+          "name": "Name",
+          "latitude": "Latitude",
+          "longitude": "Longitude",
+          "models": "Numerical models",
+          "amount_src": "Cloud amount source",
+          "update_interval": "Normal update interval",
+          "near_interval": "Near-event update interval",
+          "timezone": "Timezone"
+        }
+      }
+    }
+  }
+}

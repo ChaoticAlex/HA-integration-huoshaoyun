@@ -1,0 +1,16 @@
+{
+  "domain": "huoshaoyun",
+  "name": "火烧云 / 朝霞晚霞预报",
+  "codeowners": [
+    "@ChaoticAlex"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/ChaoticAlex/HA-integration-huoshaoyun",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/ChaoticAlex/HA-integration-huoshaoyun/issues",
+  "loggers": [
+    "custom_components.huoshaoyun"
+  ],
+  "requirements": [],
+  "version": "1.0.0"
+}

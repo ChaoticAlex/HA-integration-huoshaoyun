@@ -1,0 +1,61 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "添加火烧云预报地点",
+        "description": "选择地点来源。每个地点是一个独立条目，可添加多个。",
+        "data": {
+          "source": "地点来源"
+        }
+      },
+      "home": {
+        "title": "使用 HA 家庭位置",
+        "description": "将使用 Home Assistant 配置中的家庭经纬度。",
+        "data": {
+          "name": "地点名称"
+        }
+      },
+      "manual": {
+        "title": "手动输入经纬度",
+        "data": {
+          "name": "地点名称",
+          "latitude": "纬度",
+          "longitude": "经度"
+        }
+      },
+      "zone": {
+        "title": "从 HA 区域选择",
+        "data": {
+          "zone": "区域"
+        }
+      },
+      "zone_name": {
+        "title": "命名地点",
+        "data": {
+          "name": "地点名称"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "该坐标已配置过",
+      "no_zone": "没有可用的区域(zone)"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "火烧云预报选项",
+        "data": {
+          "name": "地点名称",
+          "latitude": "纬度",
+          "longitude": "经度",
+          "models": "数值模式",
+          "amount_src": "云量来源",
+          "update_interval": "常规刷新间隔",
+          "near_interval": "临近事件刷新间隔",
+          "timezone": "时区"
+        }
+      }
+    }
+  }
+}

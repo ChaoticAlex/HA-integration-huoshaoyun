@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# 自检/调试产物
+dump*.json
+result*.json
+out.txt
+err.txt
+ti.txt
+/config/
