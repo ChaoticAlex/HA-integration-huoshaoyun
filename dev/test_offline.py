@@ -205,6 +205,22 @@ check("明日朝霞 未过", c.data["events"]["rise_2"]["is_future"], True)
 check("挑出的下一事件 = 明日朝霞", c.data["next"]["event"], "rise_2")
 check("下一事件距今约 11.7h", round(c.data["next"]["in_hours"]), 12)
 
+print("\n[5b] 可选 API key -> customer 端点")
+
+
+def case_endpoints():
+    f_api, a_api, extra = fetcher.endpoints(None)
+    check("无 key: 预报端点", f_api, "https://api.open-meteo.com/v1/forecast")
+    check("无 key: 空气质量端点", a_api, "https://air-quality-api.open-meteo.com/v1/air-quality")
+    check("无 key: 无附加参数", extra, {})
+    f_api, a_api, extra = fetcher.endpoints("  MYKEY123  ")
+    check("有 key: 预报端点", f_api, "https://customer-api.open-meteo.com/v1/forecast")
+    check("有 key: 空气质量端点", a_api, "https://customer-air-quality-api.open-meteo.com/v1/air-quality")
+    check("有 key: apikey 参数(已去空白)", extra, {"apikey": "MYKEY123"})
+
+
+case_endpoints()
+
 print("\n[6] 部分数据缺失的标记")
 check("missing 会带出缺口名", fetcher.__doc__ is not None, True)
 print("     (取数层在气压层单组失败时 append 形如 '650-400hPa'; AOD 失败 append 'CAMS AOD')")

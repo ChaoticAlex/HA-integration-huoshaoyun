@@ -23,10 +23,12 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from . import fetcher
 from . import hsy_core as H
-from .const import (DEFAULT_INTERVAL, DEFAULT_NEAR_INTERVAL, DOMAIN, FAILURE_RETRY_MIN,
-                    MODELS_MAP, NEAR_WINDOW_HOURS, QUOTA_BACKOFF_CAP_MIN, QUOTA_BACKOFF_MIN)
+from .const import (CONF_API_KEY, DEFAULT_INTERVAL, DEFAULT_NEAR_INTERVAL, DOMAIN,
+                    FAILURE_RETRY_MIN, MODELS_MAP, NEAR_WINDOW_HOURS, QUOTA_BACKOFF_CAP_MIN,
+                    QUOTA_BACKOFF_MIN)
 
 _LOGGER = logging.getLogger(__name__)
+
 
 TIER_NEAR_H = 1.0      # <=1h  : 用"临近间隔"(默认15min)
 TIER_MID_H = 3.0       # <=3h  : 用常规间隔的一半(>=15min)
@@ -83,6 +85,7 @@ class HuoshaoyunCoordinator(DataUpdateCoordinator):
         self.models_key = opt.get("models", "both")
         self.models = MODELS_MAP.get(self.models_key, MODELS_MAP["both"])
         self.amount_src = opt.get("amount_src", "mean")
+        self.api_key = str(opt.get(CONF_API_KEY) or "").strip() or None
         self.tz = ZoneInfo(opt.get("timezone") or hass.config.time_zone)
         self._base_interval = int(opt.get("update_interval", DEFAULT_INTERVAL))
         self._near_interval = int(opt.get("near_interval", DEFAULT_NEAR_INTERVAL))
@@ -109,7 +112,7 @@ class HuoshaoyunCoordinator(DataUpdateCoordinator):
         try:
             transects, meta = await fetcher.async_fetch_transects(
                 session, self.lat, self.lon, str(self.tz), self.tz_hours,
-                base_date, self.models)
+                base_date, self.models, self.api_key)
             fingerprint = meta["fingerprint"]
         except fetcher.QuotaExhausted as err:
             # 配额用尽: 必须长退避。绝不能"失败就立刻重试"—— 每个请求都照样计入配额,

@@ -52,7 +52,8 @@
           "amount_src": "Cloud amount source",
           "update_interval": "Normal update interval",
           "near_interval": "Near-event update interval",
-          "timezone": "Timezone"
+          "timezone": "Timezone",
+          "api_key": "Open-Meteo API key (optional, customer endpoint)"
         }
       }
     }

@@ -11,7 +11,7 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (CONF_AMOUNT_SRC, CONF_INTERVAL, CONF_LATITUDE, CONF_LONGITUDE,
-                    CONF_MODELS, CONF_NAME, CONF_NEAR_INTERVAL,
+                    CONF_API_KEY, CONF_MODELS, CONF_NAME, CONF_NEAR_INTERVAL,
                     CONF_TIMEZONE, DEFAULT_INTERVAL, DEFAULT_NEAR_INTERVAL,
                     DOMAIN, MODEL_CHOICES, SRC_CHOICES)
 
@@ -142,5 +142,7 @@ class HuoshaoyunOptionsFlow(OptionsFlow):
                     unit_of_measurement="min")),
             vol.Optional(CONF_TIMEZONE, default=opt.get(CONF_TIMEZONE, self.hass.config.time_zone)):
                 selector.TextSelector(),
+            vol.Optional(CONF_API_KEY, default=opt.get(CONF_API_KEY, "")):
+                selector.TextSelector(selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)),
         })
         return self.async_show_form(step_id="init", data_schema=schema)

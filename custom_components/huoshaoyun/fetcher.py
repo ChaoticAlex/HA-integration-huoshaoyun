@@ -22,6 +22,22 @@ _LOGGER = logging.getLogger(__name__)
 
 FORECAST_API = "https://api.open-meteo.com/v1/forecast"
 AIR_API = "https://air-quality-api.open-meteo.com/v1/air-quality"
+
+
+def endpoints(api_key: str | None) -> tuple[str, str, dict]:
+    """返回 (预报端点, 空气质量端点, 附加查询参数)。
+
+    带 API key 时走 Open-Meteo 的 customer 端点(customer-api.open-meteo.com):
+    官方说明"API 语法与免费档完全相同, 只有域名和 key 参数不同", 且付费档
+    **每日/每小时额度不限** —— 这是免费档(按 IP 共享 10000/天)被打光时的正解。
+    域名规则: 在最左侧标签前加 `customer-` 前缀。
+    """
+    if not api_key:
+        return FORECAST_API, AIR_API, {}
+    key = api_key.strip()
+    return ("https://" + "customer-" + FORECAST_API.split("://", 1)[1],
+            "https://" + "customer-" + AIR_API.split("://", 1)[1],
+            {"apikey": key})
 SURFACE_VARS = ("cloud_cover_low", "cloud_cover_mid", "cloud_cover_high")
 FORECAST_DAYS = 2
 _TIMEOUT = aiohttp.ClientTimeout(total=45)
@@ -103,7 +119,8 @@ def _normalize(entry: dict, models: tuple[str, ...]) -> dict[str, dict]:
 
 async def async_fetch_transects(session: aiohttp.ClientSession, lat: float, lon: float,
                                 tz: str, tz_hours: float, base_date: datetime,
-                                models: tuple[str, ...]) -> tuple[dict, dict]:
+                                models: tuple[str, ...],
+                                api_key: str | None = None) -> tuple[dict, dict]:
     """返回 ({model: {"rise": {...}, "set": {...}}}, meta)
 
     meta = {"fingerprint": 数据指纹, "partial": 是否缺数据, "missing": [缺了什么]}
@@ -113,12 +130,13 @@ async def async_fetch_transects(session: aiohttp.ClientSession, lat: float, lon:
     (响应里的 generationtime_ms 之类易变元数据不参与哈希)。
     """
     async with _FETCH_LOCK:          # 各站点串行取数, 避免同时打爆配额
-        return await _fetch_locked(session, lat, lon, tz, tz_hours, base_date, models)
+        return await _fetch_locked(session, lat, lon, tz, tz_hours, base_date, models, api_key)
 
 
 async def _fetch_locked(session: aiohttp.ClientSession, lat: float, lon: float,
                         tz: str, tz_hours: float, base_date: datetime,
-                        models: tuple[str, ...]) -> tuple[dict, dict]:
+                        models: tuple[str, ...], api_key: str | None = None) -> tuple[dict, dict]:
+    forecast_api, air_api, extra = endpoints(api_key)
     ev = sun_events(lat, lon, base_date, tz_hours)
     az_rise = ev.get("rise_1", {}).get("azimuth", 90.0)
     az_set = ev.get("set_1", {}).get("azimuth", 270.0)
@@ -133,8 +151,8 @@ async def _fetch_locked(session: aiohttp.ClientSession, lat: float, lon: float,
               "forecast_days": FORECAST_DAYS}
 
     # 1) 地表分层云量 (18点 × 2模型, 1 次请求)
-    r_surf = await _get(session, FORECAST_API,
-                        {**common, "hourly": ",".join(SURFACE_VARS),
+    r_surf = await _get(session, forecast_api,
+                        {**common, **extra, "hourly": ",".join(SURFACE_VARS),
                          "models": ",".join(models)})
     # 2) 气压层廓线 (18点 × 2模型, 分块) —— 单块失败不致命, 用已有层继续
     plev_results, missing = [], []
@@ -142,8 +160,8 @@ async def _fetch_locked(session: aiohttp.ClientSession, lat: float, lon: float,
         vs = [f"{v}_{L}hPa" for L in chunk
               for v in ("temperature", "relative_humidity", "geopotential_height")]
         try:
-            plev_results.append(await _get(session, FORECAST_API,
-                                           {**common, "hourly": ",".join(vs),
+            plev_results.append(await _get(session, forecast_api,
+                                           {**common, **extra, "hourly": ",".join(vs),
                                             "models": ",".join(models)}))
         except Exception as err:                       # noqa: BLE001
             _LOGGER.warning("气压层 %s 获取失败, 跳过该层组: %s", chunk, err)
@@ -152,8 +170,9 @@ async def _fetch_locked(session: aiohttp.ClientSession, lat: float, lon: float,
         await asyncio.sleep(0.2)
     # 3) CAMS 气溶胶光学厚度 (18点, 与模式无关) —— 缺失则回落中性值, 不致命
     try:
-        r_aod = await _get(session, AIR_API,
+        r_aod = await _get(session, air_api,
                            {"latitude": lats, "longitude": lons, "timezone": tz,
+                            **extra,
                             "hourly": "aerosol_optical_depth", "forecast_days": FORECAST_DAYS})
     except Exception as err:                           # noqa: BLE001
         _LOGGER.warning("CAMS AOD 获取失败, 本次按中性浑浊度计算: %s", err)

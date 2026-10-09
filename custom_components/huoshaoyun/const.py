@@ -3,7 +3,7 @@ from __future__ import annotations
 
 DOMAIN = "huoshaoyun"
 NAME = "火烧云 / 朝霞晚霞预报"
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 PLATFORMS = ["sensor"]
 
 # 配置项
@@ -15,6 +15,7 @@ CONF_AMOUNT_SRC = "amount_src"
 CONF_INTERVAL = "update_interval"
 CONF_NEAR_INTERVAL = "near_interval"
 CONF_TIMEZONE = "timezone"
+CONF_API_KEY = "api_key"
 
 # 模式选择
 MODEL_CHOICES = {"both": "GFS + ECMWF 双模式(推荐)",
