@@ -18,11 +18,11 @@
 
 ## 实体（每个地点 6 个）
 
-| 实体 | state |
-|---|---|
-| `今日朝霞` `今日晚霞` `明日朝霞` `明日晚霞` | 鲜艳度 **0~2.5** |
-| `气溶胶光学厚度` | CAMS AOD（参照下次霞光） |
-| `云况诊断` | `none` / `low` / `mid` / `high` / `low+mid` |
+| 实体 | state | 说明 |
+|---|---|---|
+| `今日朝霞指数` `今日晚霞指数` `明日朝霞指数` `明日晚霞指数` | 指数 **0~2.5** | 复合指数，非物理量测量；0 = 没有可见亮面云 |
+| `下次霞光气溶胶` | CAMS AOD 数值 | **该次霞光**光路的预报值，**非实时** |
+| `下次霞光云层` | `none` / `low` / `mid` / `high` / `low+mid` | **该次霞光**时刻的云层结构预报，**非实时** |
 
 事件属性：`事件时间` `距今小时`（负值=已过）`已过` `太阳方位角` `峰值` `峰值时刻`
 `有效时段` `持续分钟` `气溶胶光学厚度` `云层` `云量来源` `各模式数值` `时间序列`
@@ -34,7 +34,7 @@
 ## 用起来
 
 ```jinja
-{% set c = 'sensor.<地点>_yun_kuang_zhen_duan' %}
+{% set c = 'sensor.<地点>_xia_ci_xia_guang_yun_ceng' %}
 {{ state_attr(c,'中云_云量')|float(0) > 0.3
    and state_attr(c,'中云_云底_m')|float(0) > 2500
    and state_attr(c,'中云_相态') == 'ice' }}
@@ -43,7 +43,7 @@
 ```yaml
 triggers:
   - trigger: numeric_state
-    entity_id: sensor.<地点>_jin_ri_wan_xia
+    entity_id: sensor.<地点>_jin_ri_wan_xia_zhi_shu
     above: 0.4                      # 阈值自己定
 ```
 

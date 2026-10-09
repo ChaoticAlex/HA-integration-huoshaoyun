@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant                              # noqa
 from homeassistant.helpers.update_coordinator import UpdateFailed         # noqa: E402
 
 from custom_components.huoshaoyun import fetcher                          # noqa: E402
+from custom_components.huoshaoyun import hsy_core as H                    # noqa: E402
 from custom_components.huoshaoyun.const import (FAILURE_RETRY_MIN,      # noqa: E402
                                                 QUOTA_BACKOFF_CAP_MIN, QUOTA_BACKOFF_MIN)
 from custom_components.huoshaoyun.coordinator import HuoshaoyunCoordinator  # noqa: E402
@@ -213,6 +214,21 @@ def case_endpoints():
 
 
 case_endpoints()
+
+print("\n[7] 实体命名(改名后由测试锁定)")
+
+
+def case_names():
+    from custom_components.huoshaoyun import sensor as S
+    c = mk()
+    got = ([S.EventQualitySensor(c, e)._attr_name for e in H.EVENTS]
+           + [S.AodSensor(c)._attr_name, S.CloudLayerSensor(c)._attr_name])
+    want = ["今日朝霞指数", "今日晚霞指数", "明日朝霞指数", "明日晚霞指数",
+            "下次霞光气溶胶", "下次霞光云层"]
+    check("6 个实体名称", got, want)
+
+
+case_names()
 
 print("\n[6] 部分数据缺失的标记")
 check("missing 会带出缺口名", fetcher.__doc__ is not None, True)

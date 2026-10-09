@@ -3,7 +3,7 @@ from __future__ import annotations
 
 DOMAIN = "huoshaoyun"
 NAME = "火烧云 / 朝霞晚霞预报"
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 PLATFORMS = ["sensor"]
 
 # 配置项

@@ -42,7 +42,7 @@ class EventQualitySensor(CoordinatorEntity[HuoshaoyunCoordinator], SensorEntity)
         super().__init__(coordinator)
         self._event = event
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{event}"
-        self._attr_name = H.EVENT_CN[event]
+        self._attr_name = f"{H.EVENT_CN[event]}指数"   # 明确是复合指数, 不是物理量测量
         self._attr_icon = EVENT_ICON.get(event, "mdi:weather-sunset")
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, coordinator.entry.entry_id)},
@@ -145,13 +145,13 @@ class _NextBasedSensor(CoordinatorEntity[HuoshaoyunCoordinator], SensorEntity):
 
 
 class AodSensor(_NextBasedSensor):
-    """下一次霞光光路上的 CAMS 气溶胶光学厚度(纯数值; 取不到则为未知)"""
+    """**下一次霞光**光路上的 CAMS 气溶胶光学厚度预报(非实时观测; 取不到为未知)"""
 
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_suggested_display_precision = 2
 
     def __init__(self, coordinator: HuoshaoyunCoordinator) -> None:
-        super().__init__(coordinator, "aod", "气溶胶光学厚度", "mdi:blur")
+        super().__init__(coordinator, "aod", "下次霞光气溶胶", "mdi:blur")
 
     @property
     def native_value(self) -> float | None:
@@ -168,14 +168,14 @@ class AodSensor(_NextBasedSensor):
 
 
 class CloudLayerSensor(_NextBasedSensor):
-    """下一次霞光的云况诊断 —— 自动化友好格式。
+    """**下一次霞光**时刻的云层结构预报 —— 不是实时观测。
 
     state = 云层类别标记: none / low / mid / high / 组合如 low+mid (云量>=0.10 者)
     各类别的云量/云底/云顶/温度/相态拆成扁平属性, 直接可写模板。
     """
 
     def __init__(self, coordinator: HuoshaoyunCoordinator) -> None:
-        super().__init__(coordinator, "clouds", "云况诊断", "mdi:cloud-outline")
+        super().__init__(coordinator, "clouds", "下次霞光云层", "mdi:cloud-outline")
 
     @property
     def _cloud(self) -> dict | None:

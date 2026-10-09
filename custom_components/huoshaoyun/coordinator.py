@@ -31,7 +31,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _merge_cloud(per_model: dict) -> dict | None:
-    """把各模式的云况诊断按均值合并(与主值=各模式均值同口径)"""
+    """把各模式的云层结构诊断按均值合并(与主值=各模式均值同口径)"""
     clouds = [v["cloud"] for v in per_model.values() if v.get("cloud")]
     if not clouds:
         return None
