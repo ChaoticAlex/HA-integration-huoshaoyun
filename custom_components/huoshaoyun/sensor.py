@@ -89,7 +89,7 @@ class EventQualitySensor(CoordinatorEntity[HuoshaoyunCoordinator], SensorEntity)
             "有效时段": info["window"],
             "持续分钟": info["duration_min"],
             # --- 物理因子 ---
-            "气溶胶光学厚度": info["aod"],            # 缺失=null(该次按中性0.2计算)
+            "AOD": info["aod"],                        # 缺失=null(该次按中性0.2计算)
             "云层": info["layers"],
             "云量来源": SRC_LABEL.get(info["amount_src"], info["amount_src"]),
             "各模式数值": info["per_model"],
@@ -104,7 +104,7 @@ class EventQualitySensor(CoordinatorEntity[HuoshaoyunCoordinator], SensorEntity)
             "冻结于": info.get("冻结于"),        # 非空=该事件已过, 数值已冻结在"最后一次事前预报"
             "事后重算": info.get("事后重算", False),  # true=事件已过但没有事前快照, 此值是事后回算的
             "口径": ("鲜艳度 0~2.5, 越高越鲜艳; 双模式取均值; "
-                    "AOD 缺失时按中性 0.2 计算(此时「气溶胶光学厚度」为 null); "
+                    "AOD 缺失时按中性 0.2 计算(此时「AOD」为 null); "
                     "太阳高度角>0 不计分; 云量口径见「云量来源」"),
         }
 
@@ -148,13 +148,13 @@ class _NextBasedSensor(CoordinatorEntity[HuoshaoyunCoordinator], SensorEntity):
 
 
 class AodSensor(_NextBasedSensor):
-    """**下一次霞光**光路上的 CAMS 气溶胶光学厚度预报(非实时观测; 取不到为未知)"""
+    """**下一次霞光**光路上的 CAMS 气溶胶光学厚度(AOD)预报(非实时观测; 取不到为未知)"""
 
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_suggested_display_precision = 2
 
     def __init__(self, coordinator: HuoshaoyunCoordinator) -> None:
-        super().__init__(coordinator, "aod", "下次霞光气溶胶", "mdi:blur")
+        super().__init__(coordinator, "aod", "下次霞光AOD", "mdi:blur")
 
     @property
     def native_value(self) -> float | None:
@@ -167,7 +167,7 @@ class AodSensor(_NextBasedSensor):
         return {**self._base_attrs(),
                 "各事件AOD": {H.EVENT_CN[k]: v["aod"] for k, v in events.items()},
                 "来源": "CAMS (ECMWF 大气组分模式)",
-                "含义": "数值越大天空越浑浊, 霞的饱和度与亮度越低"}
+                "含义": "气溶胶光学厚度(AOD)。数值越大天空越浑浊, 霞的饱和度与亮度越低"}
 
 
 class CloudLayerSensor(_NextBasedSensor):
@@ -178,7 +178,7 @@ class CloudLayerSensor(_NextBasedSensor):
     """
 
     def __init__(self, coordinator: HuoshaoyunCoordinator) -> None:
-        super().__init__(coordinator, "clouds", "下次霞光云层", "mdi:cloud-outline")
+        super().__init__(coordinator, "clouds", "下次霞光云层结构", "mdi:cloud-outline")
 
     @property
     def _cloud(self) -> dict | None:

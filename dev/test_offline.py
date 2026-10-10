@@ -254,6 +254,13 @@ async def case_recover():
         check("合成数据算出合理数值(0<q<2.5)", 0 < q < 2.5, True)
         check("云层识别生效", "mid" in data["events"]["set_1"]["cloud"]["present"], True)
         check("事件已过则冻结(13:46 时今日朝霞已过)", data["events"]["rise_1"]["事后重算"], True)
+        from custom_components.huoshaoyun import sensor as S
+        attrs = S.EventQualitySensor(c, "set_1").extra_state_attributes
+        check("事件实体暴露 AOD 属性", "AOD" in attrs, True)
+        check("旧属性名已移除", "气溶胶光学厚度" in attrs, False)
+        check("AOD 实体改名生效", S.AodSensor(c)._attr_name, "下次霞光AOD")
+        check("云层实体改名生效", S.CloudLayerSensor(c)._attr_name, "下次霞光云层结构")
+
         # 第二次: 走完整刷新(协调器会给 self.data 赋值) -> 指纹相同则应复用
         await c.async_request_refresh()
         data2 = c.data
@@ -352,7 +359,7 @@ def case_names():
     got = ([S.EventQualitySensor(c, e)._attr_name for e in H.EVENTS]
            + [S.AodSensor(c)._attr_name, S.CloudLayerSensor(c)._attr_name])
     want = ["今日朝霞指数", "今日晚霞指数", "明日朝霞指数", "明日晚霞指数",
-            "下次霞光气溶胶", "下次霞光云层"]
+            "下次霞光AOD", "下次霞光云层结构"]
     check("6 个实体名称", got, want)
 
 
