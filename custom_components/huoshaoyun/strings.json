@@ -51,9 +51,9 @@
           "longitude": "经度",
           "models": "数值模式",
           "amount_src": "云量来源",
-          "update_interval": "常规刷新间隔",
           "timezone": "时区",
-          "api_key": "Open-Meteo API key(可选, 走 customer 端点)"
+          "api_key": "Open-Meteo API key(可选, 走 customer 端点)",
+          "slot_margin": "起报延迟余量(分钟)"
         }
       }
     }

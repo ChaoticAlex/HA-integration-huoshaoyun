@@ -46,26 +46,52 @@ def nxt(hours, future=True):
     return {"in_hours": hours, "is_future": future}
 
 
-print("\n[1] 恒定节拍: 与距事件多远无关, 恒为配置值")
+print("\n[1] 按起报时刻排程 (默认余量 15 分钟)")
 
 
-def case_flat():
+def case_schedule():
+    from custom_components.huoshaoyun.coordinator import next_slot
+    base = datetime(2026, 10, 10, 0, 0)
+    cases = [
+        ("12:00", 15, "10-10 13:45", "下一个是 GFS 00Z(13:30)+15"),
+        ("13:50", 15, "10-10 16:15", "刚过 13:45 -> ECMWF 00Z(16:00)+15"),
+        ("16:20", 15, "10-10 19:45", "刚过 16:15 -> GFS 06Z(19:30)+15"),
+        ("23:00", 15, "10-11 01:45", "跨日 -> 次日 GFS 12Z+15"),
+        ("12:00", 10, "10-10 13:40", "余量 10 分钟"),
+        ("12:00", 30, "10-10 14:00", "余量 30 分钟"),
+        ("01:44", 15, "10-10 01:45", "刚好在刷新点之前"),
+        ("01:46", 15, "10-10 04:15", "刚好过点 -> 下一个"),
+    ]
+    for hhmm, margin, want, why in cases:
+        h, m = (int(x) for x in hhmm.split(":"))
+        got = next_slot(base.replace(hour=h, minute=m), margin)
+        check(f"now={hhmm} 余量{margin}min -> {want[:5]}", got.strftime("%m-%d %H:%M"), want)
+    # 排程间隔应当落在刷新点之后
     c = mk()
-    check("初始间隔", mins(c), 180)
-    for h in (0.5, 2.0, 8.0, 20.0):
-        c._stamp_events({"updated": datetime(2026, 10, 9, 12, 0), "events": {
-            "set_1": {"event_time": f"2026-10-09 {18 if h < 6 else 22:02d}:00", "quality": 0.3},
-            "rise_1": {"event_time": "2026-10-10 06:23", "quality": 0.2}}})
-        c._adapt_interval()
-        check(f"距事件 {h}h 附近仍是恒定节拍", mins(c), 180)
-    # 自定义间隔应生效
-    c2 = mk()
-    c2._base_interval = 360
-    c2._adapt_interval()
-    check("自定义 360 分钟生效", mins(c2), 360)
+    c._now = lambda: base.replace(hour=13, minute=0)
+    c._adapt_interval({"data_changed": True})
+    check("排到 13:45(即 45 分钟时)", mins(c), 45)
+    c._now = lambda: base.replace(hour=23, minute=30)
+    c._adapt_interval({"data_changed": True})
+    check("跨日排到次日 01:45(135 分钟)", mins(c), 135)
 
 
-case_flat()
+def case_miss_retry():
+    c = mk()
+    c._now = lambda: datetime(2026, 10, 10, 13, 46)
+    c._miss_retries = 0
+    for i in range(1, 4):                      # 补试 3 次, 每次 20 分钟
+        c._adapt_interval({"data_changed": False})
+        check(f"未拿到新起报 -> 第{i}次补试 20 分钟", mins(c), 20)
+    c._adapt_interval({"data_changed": False})  # 第 4 次: 放弃, 等下一个刷新点(16:15)
+    check("补试用尽 -> 等下一个刷新点", mins(c), 149)
+    c._now = lambda: datetime(2026, 10, 10, 13, 46)
+    c._adapt_interval({"data_changed": True})   # 拿到新起报 -> 排到 16:15
+    check("拿到新起报 -> 直接排下一个刷新点", mins(c), 149)
+
+
+case_schedule()
+case_miss_retry()
 
 print("\n[3] 普通失败: 抛 UpdateFailed + 实体置不可用 + 重试提前到 %d 分钟" % FAILURE_RETRY_MIN)
 
@@ -171,18 +197,74 @@ async def case_quota_backoff():
 
 asyncio.run(case_quota_backoff())
 
-print("\n[4] 失败/配额之后能回到恒定节拍")
-c = mk()
-c.update_interval = timedelta(minutes=FAILURE_RETRY_MIN)   # 普通失败后的临时短间隔
-c._adapt_interval()
-check("普通失败恢复 -> 恒定节拍", mins(c), 180)
-c.update_interval = timedelta(minutes=720)                 # 配额退避后的长间隔
-c._quota_strikes = 4
-c._adapt_interval()
-check("配额未恢复(第4次) -> 维持长退避", mins(c), 240)   # 30·2^(4-1)
-c._quota_strikes = 0
-c._adapt_interval()
-check("配额恢复 -> 恒定节拍", mins(c), 180)
+print("\n[4] 配额失败 -> 退避; 恢复 -> 排到下一个刷新点(走真实计算路径)")
+
+
+def fake_transects(base_date=datetime(2026, 10, 10)):
+    """合成一份最小但结构完整的断面数据, 让 analyse_all 真跑一遍(不联网)。"""
+    times = [(base_date + timedelta(hours=h)).strftime("%Y-%m-%dT%H:00") for h in range(48)]
+    n = len(times)
+    levels = {900: 1000, 850: 1500, 700: 3100, 600: 4400, 500: 5900,
+              400: 7600, 300: 9700, 200: 12500}
+    pt = {"time": times}
+    for L, h in levels.items():
+        mid = L <= 600
+        pt[f"geopotential_height_{L}hPa"] = [h] * n
+        pt[f"relative_humidity_{L}hPa"] = [85 if mid else 20] * n
+        pt[f"temperature_{L}hPa"] = [-8 if mid else -45] * n
+    pt["cloud_cover_low"] = [0] * n
+    pt["cloud_cover_mid"] = [60] * n
+    pt["cloud_cover_high"] = [0] * n
+    aod = {"time": times, "aerosol_optical_depth": [0.3] * n}
+    return ({"gfs_global": {"rise": {"pts": [dict(pt) for _ in range(9)], "aod": [dict(aod) for _ in range(9)]},
+                            "set": {"pts": [dict(pt) for _ in range(9)], "aod": [dict(aod) for _ in range(9)]}}},
+            {"fingerprint": "FAKE0001", "partial": False, "missing": []})
+
+
+async def case_recover():
+    c = mk("恢复点")
+    c._now = lambda: datetime(2026, 10, 10, 13, 46)
+    c.models = ("gfs_global",)
+
+    async def quota(*a, **k):
+        raise fetcher.QuotaExhausted("day", "Daily API request limit exceeded.")
+
+    async def ok(*a, **k):
+        return fake_transects()
+
+    orig = fetcher.async_fetch_transects
+    try:
+        fetcher.async_fetch_transects = quota
+        try:
+            await c._async_update_data()
+        except UpdateFailed:
+            pass
+        check("配额失败 -> 30 分钟退避", mins(c), 30)
+        check("配额连击计数", c._quota_strikes, 1)
+
+        fetcher.async_fetch_transects = ok
+        data = await c._async_update_data()          # 真跑一遍取数->计算->装配
+        c.data = data                                # 模拟协调器: 返回后才赋值给 self.data
+        check("恢复后配额计数复位", c._quota_strikes, 0)
+        check("恢复后拿到新起报", data["data_changed"], True)
+        check("恢复后排到 16:15(149 分钟)", mins(c), 149)
+        check("4 个事件都算出来了", sorted(data["events"].keys()),
+              ["rise_1", "rise_2", "set_1", "set_2"])
+        q = data["events"]["set_1"]["quality"]
+        check("合成数据算出合理数值(0<q<2.5)", 0 < q < 2.5, True)
+        check("云层识别生效", "mid" in data["events"]["set_1"]["cloud"]["present"], True)
+        check("事件已过则冻结(13:46 时今日朝霞已过)", data["events"]["rise_1"]["事后重算"], True)
+        # 第二次: 走完整刷新(协调器会给 self.data 赋值) -> 指纹相同则应复用
+        await c.async_request_refresh()
+        data2 = c.data
+        check("指纹未变 -> 复用(不重算)", data2["data_changed"], False)
+        check("指纹未变 -> 20 分钟后补试", mins(c), 20)
+    finally:
+        fetcher.async_fetch_transects = orig
+
+asyncio.run(case_recover())
+
+print("\n[4b] (旧用例已移除: 节拍不再是恒定值)")
 
 print("\n[5] 事件刻印 in_hours / 已过, 与最近事件挑选")
 c = mk()

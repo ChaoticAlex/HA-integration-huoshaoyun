@@ -50,9 +50,9 @@
           "longitude": "Longitude",
           "models": "Numerical models",
           "amount_src": "Cloud amount source",
-          "update_interval": "Normal update interval",
           "timezone": "Timezone",
-          "api_key": "Open-Meteo API key (optional, customer endpoint)"
+          "api_key": "Open-Meteo API key (optional, customer endpoint)",
+          "slot_margin": "Model availability margin (minutes)"
         }
       }
     }

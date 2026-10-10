@@ -25,10 +25,23 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from . import fetcher
 from . import hsy_core as H
-from .const import (CONF_API_KEY, DEFAULT_INTERVAL, DOMAIN, FAILURE_RETRY_MIN, MODELS_MAP,
-                    QUOTA_BACKOFF_CAP_MIN, QUOTA_BACKOFF_MIN)
+from .const import (AVAILABILITY_LOCAL, CONF_API_KEY, CONF_SLOT_MARGIN,
+                    DEFAULT_SLOT_MARGIN, DOMAIN, FAILURE_RETRY_MIN, MISS_RETRY_MAX,
+                    MISS_RETRY_MIN, MODELS_MAP, QUOTA_BACKOFF_CAP_MIN, QUOTA_BACKOFF_MIN)
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def next_slot(now: datetime, margin_min: int) -> datetime:
+    """下一个"起报可用时刻 + 余量"。返回本地 naive 时间。"""
+    slots = []
+    for day in (0, 1):
+        d = (now + timedelta(days=day)).replace(hour=0, minute=0, second=0, microsecond=0)
+        for hhmm, _name in AVAILABILITY_LOCAL:
+            h, m = (int(x) for x in hhmm.split(":"))
+            slots.append(d.replace(hour=h, minute=m) + timedelta(minutes=margin_min))
+    return min(t for t in slots if t > now)
+
 
 STORE_VERSION = 1
 SNAPSHOT_KEEP_DAYS = 2          # 快照只保留最近两天(每天 4 个事件)
@@ -83,7 +96,8 @@ class HuoshaoyunCoordinator(DataUpdateCoordinator):
         self.amount_src = opt.get("amount_src", "mean")
         self.api_key = str(opt.get(CONF_API_KEY) or "").strip() or None
         self.tz = ZoneInfo(opt.get("timezone") or hass.config.time_zone)
-        self._base_interval = int(opt.get("update_interval", DEFAULT_INTERVAL))
+        self._slot_margin = int(opt.get(CONF_SLOT_MARGIN, DEFAULT_SLOT_MARGIN))
+        self._miss_retries = 0
         self._last_fp: str | None = None
         self._quota_strikes = 0      # 连续配额用尽次数, 用于逐次翻倍退避
         # 事件过去后必须"冻结"在最后一次事前预报上, 否则拿到的不是"当时预报说了多少"
@@ -91,7 +105,7 @@ class HuoshaoyunCoordinator(DataUpdateCoordinator):
         self._snapshots: dict[str, dict] = {}
         self._store_loaded = False
         super().__init__(hass, _LOGGER, name=f"{DOMAIN} {self.site_name}",
-                         update_interval=timedelta(minutes=self._base_interval))
+                         update_interval=timedelta(minutes=DEFAULT_SLOT_MARGIN))
 
     # ------------------------------------------------------------ 工具
     def _now(self) -> datetime:
@@ -132,6 +146,10 @@ class HuoshaoyunCoordinator(DataUpdateCoordinator):
                             self.site_name, FAILURE_RETRY_MIN, err)
             raise UpdateFailed(f"取数失败: {err}") from err
 
+        if self._quota_strikes:                      # 不管走哪条路径, 拿到数据就算恢复
+            _LOGGER.info("[%s] 取数恢复, 重置配额退避", self.site_name)
+            self._quota_strikes = 0
+
         if fingerprint == self._last_fp and self.data:
             # 起报未变: 复用上轮结果, 省掉 ~0.3s 评分计算
             data = dict(self.data)
@@ -143,14 +161,12 @@ class HuoshaoyunCoordinator(DataUpdateCoordinator):
             self._stamp_events(data)
             self._apply_freeze(data)
             self._stamp_events(data)
-            self._adapt_interval()
+            self._adapt_interval(data)
             _LOGGER.debug("[%s] 起报未变, 复用上轮结果", self.site_name)
             return data
 
         self._last_fp = fingerprint
-        if self._quota_strikes:
-            _LOGGER.info("[%s] 取数恢复, 重置配额退避", self.site_name)
-            self._quota_strikes = 0
+        self._miss_retries = 0
         raw = {}
         for model in self.models:
             try:
@@ -206,7 +222,7 @@ class HuoshaoyunCoordinator(DataUpdateCoordinator):
         self._stamp_events(data)
         self._apply_freeze(data)
         self._stamp_events(data)
-        self._adapt_interval()
+        self._adapt_interval(data)
         return data
 
     # ------------------------------------------------------------ 事件时刻刻印
@@ -300,14 +316,27 @@ class HuoshaoyunCoordinator(DataUpdateCoordinator):
             self._snapshots.pop(key, None)
 
     # ------------------------------------------------------------ 刷新节拍
-    def _adapt_interval(self) -> None:
-        """恒定节拍: 只有配额用尽才临时拉长, 恢复后回到配置的固定间隔。"""
-        if self._quota_strikes:
-            mins = min(QUOTA_BACKOFF_MIN * (2 ** (self._quota_strikes - 1)),
-                       QUOTA_BACKOFF_CAP_MIN)
-        else:
-            mins = self._base_interval
-        interval = timedelta(minutes=max(5, mins))
+    def _adapt_interval(self, data: dict | None = None) -> None:
+        """按"上游起报可用时刻"排下一次刷新, 而不是固定间隔。
+
+        只在**成功**路径被调用(配额退避是在异常路径直接设置的):
+        - 若本次没拿到新起报(入库延迟, 常见), 则 20 分钟后再试, 最多补试 MISS_RETRY_MAX 次
+        - 否则排到下一个"可用时刻 + 余量"
+        """
+        if data is not None and not data.get("data_changed", True):
+            if self._miss_retries < MISS_RETRY_MAX:      # 起报迟到 -> 短间隔补试
+                self._miss_retries += 1
+                _LOGGER.debug("[%s] 未拿到新起报(第%d次补试), %d 分钟后再试",
+                              self.site_name, self._miss_retries, MISS_RETRY_MIN)
+                self._set_interval(timedelta(minutes=MISS_RETRY_MIN))
+                return
+            self._miss_retries = 0                       # 补试完仍未到, 等下一个刷新点
+        slot = next_slot(self._now(), self._slot_margin)
+        delay = (slot - self._now()).total_seconds() + 30    # +30s, 避开边界
+        _LOGGER.debug("[%s] 下一次刷新 %s (间隔 %.0f 分钟)", self.site_name,
+                      slot.strftime("%H:%M"), delay / 60)
+        self._set_interval(timedelta(seconds=max(300, delay)))
+
+    def _set_interval(self, interval: timedelta) -> None:
         if self.update_interval != interval:
-            _LOGGER.debug("[%s] 刷新间隔 -> %s 分钟", self.site_name, interval)
             self.update_interval = interval

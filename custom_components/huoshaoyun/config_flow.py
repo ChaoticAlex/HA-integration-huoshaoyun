@@ -10,9 +10,9 @@ from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.helpers import selector
 
-from .const import (CONF_AMOUNT_SRC, CONF_INTERVAL, CONF_LATITUDE, CONF_LONGITUDE,
-                    CONF_API_KEY, CONF_MODELS, CONF_NAME,
-                    CONF_TIMEZONE, DEFAULT_INTERVAL, DOMAIN, MODEL_CHOICES,
+from .const import (CONF_AMOUNT_SRC, CONF_LATITUDE, CONF_LONGITUDE,
+                    CONF_API_KEY, CONF_MODELS, CONF_NAME, CONF_SLOT_MARGIN,
+                    CONF_TIMEZONE, DEFAULT_SLOT_MARGIN, DOMAIN, MODEL_CHOICES,
                     SRC_CHOICES)
 
 _HOME = "home"
@@ -132,9 +132,10 @@ class HuoshaoyunOptionsFlow(OptionsFlow):
                 selector.SelectSelector(selector.SelectSelectorConfig(
                     options=[selector.SelectOptionDict(value=k, label=v) for k, v in SRC_CHOICES.items()],
                     mode=selector.SelectSelectorMode.DROPDOWN)),
-            vol.Required(CONF_INTERVAL, default=int(opt.get(CONF_INTERVAL, DEFAULT_INTERVAL))):
+            vol.Required(CONF_SLOT_MARGIN,
+                         default=int(opt.get(CONF_SLOT_MARGIN, DEFAULT_SLOT_MARGIN))):
                 selector.NumberSelector(selector.NumberSelectorConfig(
-                    min=30, max=720, step=15, mode=selector.NumberSelectorMode.BOX,
+                    min=5, max=60, step=5, mode=selector.NumberSelectorMode.BOX,
                     unit_of_measurement="min")),
             vol.Optional(CONF_TIMEZONE, default=opt.get(CONF_TIMEZONE, self.hass.config.time_zone)):
                 selector.TextSelector(),
