@@ -100,6 +100,9 @@ class EventQualitySensor(CoordinatorEntity[HuoshaoyunCoordinator], SensorEntity)
             "数据完整": not c.get("partial", False),   # false=有模型层/AOD 没取到, 数值置信度较低
             "缺失数据": c.get("missing") or None,
             "数据更新时刻": c.get("updated").strftime("%Y-%m-%d %H:%M") if c.get("updated") else None,
+            # --- 事件冻结(复盘用) ---
+            "冻结于": info.get("冻结于"),        # 非空=该事件已过, 数值已冻结在"最后一次事前预报"
+            "事后重算": info.get("事后重算", False),  # true=事件已过但没有事前快照, 此值是事后回算的
             "口径": ("鲜艳度 0~2.5, 越高越鲜艳; 双模式取均值; "
                     "AOD 缺失时按中性 0.2 计算(此时「气溶胶光学厚度」为 null); "
                     "太阳高度角>0 不计分; 云量口径见「云量来源」"),

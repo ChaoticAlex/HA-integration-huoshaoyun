@@ -215,6 +215,52 @@ def case_endpoints():
 
 case_endpoints()
 
+print("\n[6b] 事件冻结: 已过事件不再随新起报漂移")
+
+
+def case_freeze():
+    c = mk("冻结点")
+    c._store_loaded = True          # 跳过 Store 载入
+    c._snapshots = {}
+    # 第一次: 事件还在未来 -> 记录事前快照
+    d1 = {"updated": datetime(2026, 10, 10, 10, 0),
+          "events": {"set_1": {"event_time": "2026-10-10 18:06", "quality": 0.40,
+                               "peak": 0.8, "layers": "mid"}}}
+    c._apply_freeze(d1)
+    check("未过事件不冻结", d1["events"]["set_1"]["冻结于"], None)
+    check("未过事件已存快照", "set_1_2026-10-10" in c._snapshots, True)
+    # 第二次(新起报): 仍是未来 -> 快照更新为 0.45
+    d2 = {"updated": datetime(2026, 10, 10, 13, 0),
+          "events": {"set_1": {"event_time": "2026-10-10 18:06", "quality": 0.45,
+                               "peak": 0.9, "layers": "mid"}}}
+    c._apply_freeze(d2)
+    check("事前快照取最新的一次", c._snapshots["set_1_2026-10-10"]["info"]["quality"], 0.45)
+    # 第三次: 事件已过 + 起报又变(0.60) -> 必须冻结回 0.45, 不被污染
+    d3 = {"updated": datetime(2026, 10, 10, 19, 0),
+          "events": {"set_1": {"event_time": "2026-10-10 18:06", "quality": 0.60,
+                               "peak": 1.2, "layers": "mid"}}}
+    c._apply_freeze(d3)
+    check("已过事件被冻结(回到事前值)", d3["events"]["set_1"]["quality"], 0.45)
+    check("冻结时间戳", d3["events"]["set_1"]["冻结于"], "2026-10-10 13:00")
+    check("事后重算标记为假", d3["events"]["set_1"]["事后重算"], False)
+    # 第四次: 昨天的键不该污染今天
+    d4 = {"updated": datetime(2026, 10, 11, 8, 0),
+          "events": {"set_1": {"event_time": "2026-10-11 18:05", "quality": 0.30}}}
+    c._apply_freeze(d4)
+    check("跨日后不张冠李戴", d4["events"]["set_1"]["quality"], 0.30)
+    check("新的一天重新计为事前", d4["events"]["set_1"]["冻结于"], None)
+    # 第五: 无事前快照(事后才装) -> 标注事后重算
+    c2 = mk("事后点")
+    c2._store_loaded = True
+    c2._snapshots = {}
+    d5 = {"updated": datetime(2026, 10, 10, 19, 0),
+          "events": {"rise_1": {"event_time": "2026-10-10 06:23", "quality": 0.2}}}
+    c2._apply_freeze(d5)
+    check("无事前快照时标事后重算", d5["events"]["rise_1"]["事后重算"], True)
+
+
+case_freeze()
+
 print("\n[7] 实体命名(改名后由测试锁定)")
 
 

@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from . import fetcher
@@ -28,6 +29,10 @@ from .const import (CONF_API_KEY, DEFAULT_INTERVAL, DOMAIN, FAILURE_RETRY_MIN, M
                     QUOTA_BACKOFF_CAP_MIN, QUOTA_BACKOFF_MIN)
 
 _LOGGER = logging.getLogger(__name__)
+
+STORE_VERSION = 1
+SNAPSHOT_KEEP_DAYS = 2          # 快照只保留最近两天(每天 4 个事件)
+SNAPSHOT_FIELDS_SKIP = ("in_hours", "is_future", "冻结于", "事后重算")
 
 
 def _merge_cloud(per_model: dict) -> dict | None:
@@ -81,6 +86,10 @@ class HuoshaoyunCoordinator(DataUpdateCoordinator):
         self._base_interval = int(opt.get("update_interval", DEFAULT_INTERVAL))
         self._last_fp: str | None = None
         self._quota_strikes = 0      # 连续配额用尽次数, 用于逐次翻倍退避
+        # 事件过去后必须"冻结"在最后一次事前预报上, 否则拿到的不是"当时预报说了多少"
+        self._store = Store(hass, STORE_VERSION, f"{DOMAIN}.{entry.entry_id}")
+        self._snapshots: dict[str, dict] = {}
+        self._store_loaded = False
         super().__init__(hass, _LOGGER, name=f"{DOMAIN} {self.site_name}",
                          update_interval=timedelta(minutes=self._base_interval))
 
@@ -130,6 +139,9 @@ class HuoshaoyunCoordinator(DataUpdateCoordinator):
             data["data_changed"] = False
             data["partial"] = meta["partial"]
             data["missing"] = meta["missing"]
+            await self._load_snapshots()
+            self._stamp_events(data)
+            self._apply_freeze(data)
             self._stamp_events(data)
             self._adapt_interval()
             _LOGGER.debug("[%s] 起报未变, 复用上轮结果", self.site_name)
@@ -190,6 +202,9 @@ class HuoshaoyunCoordinator(DataUpdateCoordinator):
                 "series": ref["series"],
                 "amount_src": self.amount_src,
             }
+        await self._load_snapshots()
+        self._stamp_events(data)
+        self._apply_freeze(data)
         self._stamp_events(data)
         self._adapt_interval()
         return data
@@ -228,6 +243,61 @@ class HuoshaoyunCoordinator(DataUpdateCoordinator):
                 "is_future": info.get("is_future"), "quality": info.get("quality"),
                 "aod": info.get("aod"), "layers": info.get("layers"),
                 "cloud": info.get("cloud")}
+
+    # ------------------------------------------------------------ 事件冻结
+    async def _load_snapshots(self) -> None:
+        if self._store_loaded:
+            return
+        self._store_loaded = True
+        try:
+            self._snapshots = await self._store.async_load() or {}
+            _LOGGER.debug("[%s] 载入 %d 条事前快照", self.site_name, len(self._snapshots))
+        except Exception as err:                       # noqa: BLE001
+            _LOGGER.warning("[%s] 事前快照载入失败, 从空开始: %s", self.site_name, err)
+            self._snapshots = {}
+
+    def _apply_freeze(self, data: dict) -> None:
+        """事件未过: 记为"事前预报"快照; 事件已过: 用快照覆盖, 不再随新起报漂移。
+
+        快照键 = 事件 + 事件日期 —— 跨过 00:00 后"今日朝霞"会指向新的一天,
+        若只按事件名做键, 昨天的冻结值会被张冠李戴到今天。
+        """
+        now = data["updated"]
+        changed = False
+        for event, info in data["events"].items():
+            try:
+                t = datetime.strptime(info["event_time"], "%Y-%m-%d %H:%M")
+            except (ValueError, KeyError):
+                continue
+            key = f"{event}_{t:%Y-%m-%d}"
+            if now < t:                                # 事件未到: 更新快照(总是保留最新的那次事前预报)
+                self._snapshots[key] = {
+                    "saved_at": now.strftime("%Y-%m-%d %H:%M"),
+                    "info": {k: v for k, v in info.items() if k not in SNAPSHOT_FIELDS_SKIP},
+                }
+                info["冻结于"] = None
+                info["事后重算"] = False
+                changed = True
+            else:                                      # 事件已过: 冻结
+                snap = self._snapshots.get(key)
+                if snap:
+                    for k, v in snap["info"].items():
+                        info[k] = v
+                    info["冻结于"] = snap["saved_at"]
+                    info["事后重算"] = False
+                else:                                  # 没有事前快照(例如集成是事后才装的)
+                    info["冻结于"] = None
+                    info["事后重算"] = True
+        if changed:
+            self._prune_snapshots()
+            self._store.async_delay_save(lambda: self._snapshots, 60)
+
+    def _prune_snapshots(self) -> None:
+        """只保留最近 SNAPSHOT_KEEP_DAYS 天的快照"""
+        cutoff = (self._now() - timedelta(days=SNAPSHOT_KEEP_DAYS)).strftime("%Y-%m-%d")
+        for key in [k for k in self._snapshots
+                    if k.rsplit("_", 1)[-1] < cutoff]:
+            self._snapshots.pop(key, None)
 
     # ------------------------------------------------------------ 刷新节拍
     def _adapt_interval(self) -> None:
