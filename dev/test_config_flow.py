@@ -52,12 +52,12 @@ async def call(label, fn, *a, **kw):
 
 def mk_hass(with_zone=True):
     hass = HomeAssistant()
-    hass.config.latitude = 39.9042
-    hass.config.longitude = 116.4074
+    hass.config.latitude = 12.5
+    hass.config.longitude = 34.5
     hass.config.time_zone = "Asia/Shanghai"
     if with_zone:
-        hass.states.add("zone.home", "家", {"latitude": 39.9042, "longitude": 116.4074})
-        hass.states.add("zone.office", "公司", {"latitude": 31.2304, "longitude": 121.4737})
+        hass.states.add("zone.home", "家", {"latitude": 12.5, "longitude": 34.5})
+        hass.states.add("zone.office", "公司", {"latitude": 56.7, "longitude": 8.9})
         hass.states.add("zone.noloc", "无坐标", {})          # 缺经纬度, 应被跳过
     return hass
 
@@ -81,19 +81,19 @@ async def main():
     r = await call("提交命名", f.async_step_home, {CONF_NAME: "家"})
     check("建成条目", r and r["type"], "create_entry")
     cd = (f.created or {}).get("data", {})
-    check("坐标取自 HA 配置", (cd.get(CONF_LATITUDE), cd.get(CONF_LONGITUDE)), (39.9042, 116.4074))
-    check("unique_id", f._unique_id, "39.9042,116.4074")
+    check("坐标取自 HA 配置", (cd.get(CONF_LATITUDE), cd.get(CONF_LONGITUDE)), (12.5, 34.5))
+    check("unique_id", f._unique_id, "12.5,34.5")
 
     print("\n[3] 路径 B: 手动输入经纬度  ← 线上报 Unknown error occurred 的位置")
     f = new_flow()
     await call("选择 manual -> 显示坐标表单", f.async_step_user, {"source": "manual"})
     check("manual step_id", (f.form or {}).get("step_id"), "manual")
     r = await call("提交手动坐标(含 5 位小数)", f.async_step_manual,
-                   {CONF_NAME: "测试点", CONF_LATITUDE: 23.12912, CONF_LONGITUDE: 113.26439})
+                   {CONF_NAME: "测试点", CONF_LATITUDE: 12.34568, CONF_LONGITUDE: 123.45678})
     check("建成条目", r and r["type"], "create_entry")
     cd = (f.created or {}).get("data", {})
-    check("坐标写入", (cd.get(CONF_LATITUDE), cd.get(CONF_LONGITUDE)), (23.12912, 113.26439))
-    check("unique_id 取 4 位", f._unique_id, "23.1291,113.2644")
+    check("坐标写入", (cd.get(CONF_LATITUDE), cd.get(CONF_LONGITUDE)), (12.34568, 123.45678))
+    check("unique_id 取 4 位", f._unique_id, "12.3457,123.4568")
 
     print("\n[4] 路径 C: 从 zone 选择")
     f = new_flow()
@@ -103,7 +103,7 @@ async def main():
     check("进入命名步骤", (f.form or {}).get("step_id"), "zone_name")
     await call("提交命名", f.async_step_zone_name, {CONF_NAME: "公司"})
     cd = (f.created or {}).get("data", {})
-    check("坐标取自 zone", (cd.get(CONF_LATITUDE), cd.get(CONF_LONGITUDE)), (31.2304, 121.4737))
+    check("坐标取自 zone", (cd.get(CONF_LATITUDE), cd.get(CONF_LONGITUDE)), (56.7, 8.9))
 
     print("\n[5] 路径 C 边界: 没有任何可用 zone")
     f = new_flow(with_zone=False)
@@ -114,11 +114,11 @@ async def main():
     of = HuoshaoyunOptionsFlow()
     of.hass = mk_hass()
     of.config_entry = ConfigEntry(entry_id="e1", data={CONF_NAME: "旧名",
-                                                      CONF_LATITUDE: 23.1291,
-                                                      CONF_LONGITUDE: 113.2644})
+                                                      CONF_LATITUDE: 12.3457,
+                                                      CONF_LONGITUDE: 123.4568})
     await call("显示选项表单", of.async_step_init, None)
     check("选项 step_id", (of.form or {}).get("step_id"), "init")
-    submitted = {CONF_NAME: "新名", CONF_LATITUDE: 23.5, CONF_LONGITUDE: 113.5,
+    submitted = {CONF_NAME: "新名", CONF_LATITUDE: 48.5, CONF_LONGITUDE: 6.5,
                  CONF_MODELS: "both", CONF_AMOUNT_SRC: "mean", CONF_SLOT_MARGIN: 15}
     r = await call("提交选项", of.async_step_init, submitted)
     check("选项保存", r and r["type"], "create_entry")
