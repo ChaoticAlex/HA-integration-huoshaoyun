@@ -24,10 +24,10 @@ def _coord_schema(hass, name_default: str = "", include_name: bool = True) -> vo
     fields = {
         vol.Required(CONF_LATITUDE, default=hass.config.latitude):
             selector.NumberSelector(selector.NumberSelectorConfig(
-                min=-90, max=90, step=0.000001, mode=selector.NumberSelectorMode.BOX)),
+                min=-90, max=90, step="any", mode=selector.NumberSelectorMode.BOX)),
         vol.Required(CONF_LONGITUDE, default=hass.config.longitude):
             selector.NumberSelector(selector.NumberSelectorConfig(
-                min=-180, max=180, step=0.000001, mode=selector.NumberSelectorMode.BOX)),
+                min=-180, max=180, step="any", mode=selector.NumberSelectorMode.BOX)),
     }
     if include_name:
         fields = {vol.Required(CONF_NAME, default=name_default): selector.TextSelector(), **fields}
@@ -120,10 +120,10 @@ class HuoshaoyunOptionsFlow(OptionsFlow):
             vol.Required(CONF_NAME, default=opt.get(CONF_NAME, "")): selector.TextSelector(),
             vol.Required(CONF_LATITUDE, default=float(opt.get(CONF_LATITUDE, self.hass.config.latitude))):
                 selector.NumberSelector(selector.NumberSelectorConfig(
-                    min=-90, max=90, step=0.000001, mode=selector.NumberSelectorMode.BOX)),
+                    min=-90, max=90, step="any", mode=selector.NumberSelectorMode.BOX)),
             vol.Required(CONF_LONGITUDE, default=float(opt.get(CONF_LONGITUDE, self.hass.config.longitude))):
                 selector.NumberSelector(selector.NumberSelectorConfig(
-                    min=-180, max=180, step=0.000001, mode=selector.NumberSelectorMode.BOX)),
+                    min=-180, max=180, step="any", mode=selector.NumberSelectorMode.BOX)),
             vol.Required(CONF_MODELS, default=opt.get(CONF_MODELS, "both")):
                 selector.SelectSelector(selector.SelectSelectorConfig(
                     options=[selector.SelectOptionDict(value=k, label=v) for k, v in MODEL_CHOICES.items()],

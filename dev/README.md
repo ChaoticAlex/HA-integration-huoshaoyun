@@ -2,6 +2,7 @@
 
 | 脚本 | 需要联网 | 说明 |
 |---|---|---|
+| `test_config_flow.py` | ❌ | **配置流走查**：4 条添加入口 + 选项流，含 selector 参数合法性（HA 对 NumberSelector 的 step 有 >= 1e-3 约束）|
 | `test_offline.py` | ❌ | **纯逻辑自检**：请求分档节拍、未变退避、失败语义、事件刻印。用 `_teststub/` 的最小 homeassistant 桩，秒级跑完 |
 | `sim_requests.py` | ❌ | 仿真 24h 请求量（旧固定节拍 vs 新分档+退避） |
 | `test_local.py` | ✅ | 算法 + 取数链路自检（需自备坐标） |

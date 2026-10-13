@@ -305,12 +305,16 @@ class HuoshaoyunCoordinator(DataUpdateCoordinator):
                     info["冻结于"] = None
                     info["事后重算"] = True
         if changed:
-            self._prune_snapshots()
+            self._prune_snapshots(now)
             self._store.async_delay_save(lambda: self._snapshots, 60)
 
-    def _prune_snapshots(self) -> None:
-        """只保留最近 SNAPSHOT_KEEP_DAYS 天的快照"""
-        cutoff = (self._now() - timedelta(days=SNAPSHOT_KEEP_DAYS)).strftime("%Y-%m-%d")
+    def _prune_snapshots(self, now: datetime) -> None:
+        """只保留最近 SNAPSHOT_KEEP_DAYS 天的快照。
+
+        `now` 用本轮刷新时间(与快照键的来源同一时间源), 不要用 self._now():
+        两者混用会在时钟跳变/测试里出现"刚存的快照被立刻清掉"。
+        """
+        cutoff = (now - timedelta(days=SNAPSHOT_KEEP_DAYS)).strftime("%Y-%m-%d")
         for key in [k for k in self._snapshots
                     if k.rsplit("_", 1)[-1] < cutoff]:
             self._snapshots.pop(key, None)
