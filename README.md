@@ -111,11 +111,6 @@ CGNAT 环境下这一项基本无解，key 是唯一干净的出路。
 - **未实测**：未在真实 Home Assistant 中加载运行，实体实际取值与长期稳定性未经真机验证
 - **成熟度**：实验性（experimental）
 
-HA 的 [OHF AI Policy](https://developers.home-assistant.io/docs/ai_policy/) 只约束提交给
-Open Home Foundation 项目（如 HA Core）的贡献，**不自动约束 HACS 社区集成**；
-[社区惯例](https://github.com/jpawlowski/hacs.integration_blueprint/blob/main/AI_POLICY.md)
-则主张按上述维度如实披露。
-
 ## 声明与许可
 
 非官方第三方集成；算法依据 sunsetbot.top 及其团队**公开发布**的
